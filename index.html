@@ -1,1 +1,975 @@
 
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="BP Monitor"/>
+  <meta name="theme-color" content="#0d1117"/>
+  <title>BP Monitor · Blutdruck Analyse</title>
+
+  <!-- Apple Touch Icon: custom SVG heart + waveform -->
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%230d1a2e'/><stop offset='1' stop-color='%23091525'/></linearGradient></defs><rect width='180' height='180' rx='38' fill='url(%23g)'/><path d='M90 130 C90 130 42 100 42 68 C42 52 55 42 68 42 C77 42 85 47 90 55 C95 47 103 42 112 42 C125 42 138 52 138 68 C138 100 90 130 90 130Z' fill='%23ef4444' opacity='0.15'/><path d='M90 124 C90 124 46 96 46 68 C46 55 57 46 68 46 C78 46 86 52 90 60 C94 52 102 46 112 46 C123 46 134 55 134 68 C134 96 90 124 90 124Z' fill='%23ef4444'/><polyline points='54,90 66,90 72,76 80,104 88,82 96,95 102,90 126,90' fill='none' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round' opacity='0.9'/></svg>"/>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230d1117'/><path d='M16 24 C16 24 6 18 6 11 C6 7 9 5 12 5 C14 5 15.5 6 16 8 C16.5 6 18 5 20 5 C23 5 26 7 26 11 C26 18 16 24 16 24Z' fill='%23ef4444'/><polyline points='8,16 11,16 12.5,12 14.5,20 16,14 17.5,17 19,16 24,16' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    // Disable worker - run in main thread (avoids FileReader + Worker issues on all browsers)
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    :root {
+      --bg:#0d1117; --bg2:#111820; --bg3:#1a2535; --border:#1e2d3d;
+      --text:#e0e8f0; --muted:#5a7a99; --accent:#3b7dd8;
+      --green:#4ade80; --orange:#f97316; --red:#ef4444; --purple:#a78bfa;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+    body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,sans-serif;min-height:100vh;overflow-x:hidden}
+    .header{background:linear-gradient(135deg,#0d1a2e,#0d1117);border-bottom:1px solid var(--border);padding:52px 20px 20px;position:relative;overflow:hidden}
+    .header::before{content:'';position:absolute;top:-60px;right:-60px;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(59,125,216,.12) 0%,transparent 70%)}
+    .header-label{font-size:10px;color:var(--accent);letter-spacing:3px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;margin-bottom:6px}
+    .header-title{font-size:22px;font-weight:700;margin-bottom:2px}
+    .header-sub{font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+    .upload-section{padding:16px}
+    .upload-zone{border:2px dashed var(--border);border-radius:14px;padding:24px;text-align:center;cursor:pointer;transition:all .2s;background:var(--bg2);position:relative}
+    .upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:#111e30}
+    .upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+    .upload-icon{font-size:32px;margin-bottom:8px}
+    .upload-title{font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px}
+    .upload-sub{font-size:12px;color:var(--muted)}
+    .upload-status{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+    .file-chip{display:flex;align-items:center;gap:8px;background:var(--bg3);border-radius:8px;padding:8px 12px;font-size:12px}
+    .chip-name{flex:1;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .chip-ok{color:var(--green);font-family:'JetBrains Mono',monospace;font-size:10px;flex-shrink:0}
+    .chip-err{color:var(--red);font-family:'JetBrains Mono',monospace;font-size:10px;flex-shrink:0}
+    .chip-loading{color:var(--accent);font-family:'JetBrains Mono',monospace;font-size:10px;flex-shrink:0}
+    .remove-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 2px;flex-shrink:0}
+    .reset-btn{background:none;border:1px solid #ef444455;color:#ef4444;border-radius:8px;padding:5px 12px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer;transition:all .2s;white-space:nowrap}
+    .reset-btn:hover{background:#ef444422}
+    .reset-btn:disabled{opacity:0.3;cursor:default}
+    .export-btn{background:none;border:1px solid #3b7dd855;color:#3b7dd8;border-radius:8px;padding:5px 12px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer;transition:all .2s;white-space:nowrap}
+    .export-btn:hover{background:#3b7dd822}
+    .export-btn:disabled{opacity:0.3;cursor:default}
+    .import-btn{background:none;border:1px solid #4ade8055;color:#4ade80;border-radius:8px;padding:5px 12px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer;transition:all .2s;white-space:nowrap;position:relative}
+    .import-btn:hover{background:#4ade8022}
+    .import-btn input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+    .upload-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:6px;flex-wrap:wrap}
+    .upload-top-label{font-size:11px;color:var(--muted);font-weight:500;flex:1}
+    #confirm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:500;align-items:flex-end;justify-content:center;padding-bottom:calc(20px + env(safe-area-inset-bottom,0px))}
+    #confirm-overlay.show{display:flex}
+    .confirm-sheet{background:#1a2535;border:1px solid var(--border);border-radius:18px 18px 0 0;padding:24px 20px;width:100%;max-width:480px}
+    .confirm-title{font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px}
+    .confirm-sub{font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5}
+    .confirm-btns{display:flex;gap:10px}
+    .confirm-cancel{flex:1;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);font-size:14px;font-weight:600;cursor:pointer}
+    .confirm-ok{flex:1;padding:12px;border-radius:10px;border:none;background:#ef4444;color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+    .kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px 8px}
+    .kpi-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+    .kpi-month{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+    .kpi-val{font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace;margin-bottom:2px}
+    .kpi-hr{font-size:11px;color:var(--muted);margin-bottom:8px}
+    .progress-bar{height:5px;background:var(--bg3);border-radius:3px;overflow:hidden}
+    .progress-fill{height:100%;border-radius:3px}
+    .kpi-pct{font-size:10px;color:var(--muted);margin-top:4px;font-family:'JetBrains Mono',monospace}
+    .kpi-empty{display:flex;align-items:center;justify-content:center;min-height:80px;border:2px dashed var(--border);border-radius:12px;color:var(--muted);font-size:12px}
+    .tabs-wrapper{overflow-x:auto;-webkit-overflow-scrolling:touch;padding:12px 16px 0;scrollbar-width:none}
+    .tabs-wrapper::-webkit-scrollbar{display:none}
+    .tabs{display:flex;gap:6px;width:max-content}
+    .tab-btn{padding:8px 16px;border-radius:20px;border:1px solid var(--border);background:var(--bg2);color:var(--muted);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all .2s}
+    .tab-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+    .content{padding:16px;padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+    .tab-panel{display:none} .tab-panel.active{display:block}
+    .chart-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:14px}
+    .chart-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px}
+    .chart-sub{font-size:11px;color:var(--muted);margin-bottom:14px}
+    .bar-group{display:flex;flex-direction:column;gap:10px}
+    .bar-row{display:flex;align-items:center;gap:8px}
+    .bar-label{width:54px;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;flex-shrink:0}
+    .bar-track{flex:1;height:24px;background:var(--bg3);border-radius:6px;overflow:hidden;display:flex}
+    .bar-segment{height:100%}
+    .bar-val{width:44px;font-size:11px;font-family:'JetBrains Mono',monospace;text-align:right;flex-shrink:0}
+    .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+    .legend-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+    .spark-wrap{position:relative;height:130px;margin:8px 0}
+    svg.spark{width:100%;height:100%;overflow:visible}
+    .data-table{width:100%;border-collapse:collapse;font-size:12px}
+    .data-table th{padding:8px 10px;text-align:left;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border);font-size:11px}
+    .data-table td{padding:10px 10px;border-bottom:1px solid var(--bg3)}
+    .data-table tr:last-child td{border-bottom:none}
+    .peak-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .peak-card{background:var(--bg);border-radius:10px;padding:12px 14px;border-left:3px solid}
+    .peak-month{font-size:10px;color:var(--muted);margin-bottom:4px;font-family:'JetBrains Mono',monospace}
+    .peak-val{font-size:20px;font-weight:700;font-family:'JetBrains Mono',monospace}
+    .peak-date{font-size:10px;color:var(--muted);margin-top:2px}
+    .disclaimer{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:14px;font-size:11px;color:var(--muted);line-height:1.6}
+    .empty-state{text-align:center;padding:40px 20px;color:var(--muted)}
+    .empty-state .emoji{font-size:48px;margin-bottom:12px}
+    .empty-state p{font-size:13px;line-height:1.7}
+    #toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#1e2d3d;border:1px solid var(--accent);border-radius:10px;padding:10px 18px;font-size:12px;color:var(--text);z-index:999;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
+    #toast.show{opacity:1}
+    #report-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:600;flex-direction:column}
+    #report-overlay.show{display:flex}
+    #report-toolbar{background:#1a2535;border-bottom:1px solid var(--border);padding:12px 16px;display:flex;gap:10px;align-items:center;flex-shrink:0}
+    #report-toolbar span{flex:1;font-size:13px;font-weight:600;color:var(--text)}
+    .report-action-btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer}
+    .report-close-btn{background:var(--bg3);color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer}
+    #report-frame{flex:1;border:none;background:#fff}
+    @media print{#report-toolbar{display:none}}
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-label">Hilo Band · 24h ABPM</div>
+  <div class="header-title">
+    <svg style="width:22px;height:22px;vertical-align:-4px;margin-right:8px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 21 C12 21 3 15.5 3 9.5 C3 6.5 5.5 4 8.5 4 C10 4 11.2 4.8 12 6 C12.8 4.8 14 4 15.5 4 C18.5 4 21 6.5 21 9.5 C21 15.5 12 21 12 21Z" fill="#ef4444"/>
+      <polyline points="5,12 7.5,12 9,8.5 11,15.5 12.5,10 14,13 15.5,12 19,12" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>BP Monitor
+  </div>
+  <div class="header-sub" id="header-sub">Persönliche Blutdruck-Analyse</div>
+</div>
+
+<div class="upload-section">
+  <div class="upload-top">
+    <span class="upload-top-label">Monatsberichte</span>
+    <button class="export-btn" id="export-btn" disabled onclick="exportPDF()">📤 Bericht</button>
+    <button class="reset-btn" id="reset-btn" disabled onclick="confirmReset()">🗑 Alle löschen</button>
+  </div>
+  <div class="upload-zone" id="upload-zone">
+    <input type="file" id="file-input" accept=".pdf" multiple/>
+    <div class="upload-icon">📄</div>
+    <div class="upload-title">Hilo Band PDF hochladen</div>
+    <div class="upload-sub">Monatsbericht(e) auswählen · mehrere möglich</div>
+  </div>
+  <div class="upload-status" id="upload-status"></div>
+</div>
+
+<div class="kpi-grid" id="kpi-grid">
+  <div class="kpi-empty">Noch keine Daten</div>
+  <div class="kpi-empty">Noch keine Daten</div>
+</div>
+
+<div class="tabs-wrapper">
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('overview',this)">Übersicht</button>
+    <button class="tab-btn" onclick="switchTab('bd',this)">BD-Kategorien</button>
+    <button class="tab-btn" onclick="switchTab('puls',this)">Puls</button>
+    <button class="tab-btn" onclick="switchTab('extremes',this)">Extremwerte</button>
+    <button class="tab-btn" onclick="switchTab('tages',this)">Tagesanalyse</button>
+  </div>
+</div>
+
+<div class="content">
+  <div class="tab-panel active" id="tab-overview">
+    <div class="empty-state" id="empty-overview"><div class="emoji">📊</div><p>Lade einen oder mehrere<br>Hilo Band Monatsberichte hoch.</p></div>
+    <div id="overview-content" style="display:none"></div>
+  </div>
+  <div class="tab-panel" id="tab-bd">
+    <div class="empty-state" id="empty-bd"><div class="emoji">📈</div><p>Keine Daten geladen</p></div>
+    <div id="bd-content" style="display:none"></div>
+  </div>
+  <div class="tab-panel" id="tab-puls">
+    <div class="empty-state" id="empty-puls"><div class="emoji">💓</div><p>Keine Daten geladen</p></div>
+    <div id="puls-content" style="display:none"></div>
+  </div>
+  <div class="tab-panel" id="tab-extremes">
+    <div class="empty-state" id="empty-extremes"><div class="emoji">⚠️</div><p>Keine Daten geladen</p></div>
+    <div id="extremes-content" style="display:none"></div>
+  </div>
+  <div class="tab-panel" id="tab-tages">
+    <div class="empty-state" id="empty-tages"><div class="emoji">📅</div><p>Keine Daten geladen</p></div>
+    <div id="tages-content" style="display:none">
+      <div style="padding-bottom:12px">
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:6px">Monat wählen:</label>
+        <select id="tages-month-select" onchange="renderTages()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 12px;font-size:13px;width:100%;cursor:pointer"></select>
+      </div>
+      <div id="tages-inner"></div>
+    </div>
+  </div>
+</div>
+
+<div id="report-overlay">
+  <div id="report-toolbar">
+    <span>📄 Bericht</span>
+    <button class="report-action-btn" onclick="printReport()">🖨 Drucken / Als PDF</button>
+    <button class="report-close-btn" onclick="closeReport()">✕ Schliessen</button>
+  </div>
+  <iframe id="report-frame"></iframe>
+</div>
+
+<div id="confirm-overlay">
+  <div class="confirm-sheet">
+    <div class="confirm-title">Alle Daten löschen?</div>
+    <div class="confirm-sub">Alle geladenen Monatsberichte werden entfernt. Die Original-PDFs bleiben unberührt.</div>
+    <div class="confirm-btns">
+      <button class="confirm-cancel" onclick="closeConfirm()">Abbrechen</button>
+      <button class="confirm-ok" onclick="doReset()">Löschen</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const MON_EN={January:1,February:2,March:3,April:4,May:5,June:6,July:7,August:8,September:9,October:10,November:11,December:12};
+const MON_SHORT=['','Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+const MON_LONG=['','Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+
+let allData={};
+
+function switchTab(id,btn){
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  btn.classList.add('active');
+}
+
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2500);
+}
+
+const zone=document.getElementById('upload-zone');
+const fi=document.getElementById('file-input');
+zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('drag')});
+zone.addEventListener('dragleave',()=>zone.classList.remove('drag'));
+zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('drag');handleFiles([...e.dataTransfer.files])});
+fi.addEventListener('change',()=>{handleFiles([...fi.files]);fi.value=''});
+
+function handleFiles(files){
+  files.filter(f=>f.name.endsWith('.pdf')).forEach(f=>processFile(f));
+}
+
+function chipId(name){return 'chip-'+name.replace(/\W/g,'_')}
+
+function addChip(file){
+  const id=chipId(file.name);
+  document.getElementById(id)?.remove();
+  const div=document.createElement('div');
+  div.className='file-chip'; div.id=id;
+  div.innerHTML=`<span>📄</span><span class="chip-name">${file.name}</span><span class="chip-loading" id="stat-${id}">⏳ Lese...</span><button class="remove-btn" data-id="${id}">✕</button>`;
+  div.querySelector('.remove-btn').addEventListener('click',()=>{
+    const key=div.dataset.monthkey;
+    if(key){delete allData[key];renderAll();}
+    div.remove();
+  });
+  document.getElementById('upload-status').appendChild(div);
+  return id;
+}
+
+function updateChip(id,ok,label){
+  const el=document.getElementById('stat-'+id);
+  if(!el)return;
+  el.className=ok?'chip-ok':'chip-err';
+  el.textContent=ok?'✓ '+label:'✗ Fehler';
+}
+
+async function processFile(file){
+  const id=addChip(file);
+  try{
+    const buf=await file.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+    let txt='';
+    for(let i=1;i<=pdf.numPages;i++){
+      const pg=await pdf.getPage(i);
+      const c=await pg.getTextContent({includeMarkedContent:false});
+      // Group items into lines by Y position, then join words within each line
+      const lineMap={};
+      c.items.forEach(item=>{
+        if(!item.str||!item.transform)return;
+        const y=Math.round(item.transform[5]);
+        if(!lineMap[y])lineMap[y]=[];
+        lineMap[y].push({x:item.transform[4],str:item.str});
+      });
+      // Sort lines top-to-bottom, words left-to-right
+      const lines=Object.keys(lineMap).sort((a,b)=>b-a).map(y=>{
+        return lineMap[y].sort((a,b)=>a.x-b.x).map(w=>w.str).join(' ');
+      });
+      txt+=lines.join('\n')+'\n';
+    }
+    const data=parsePDF(txt);
+    if(!data)throw new Error('Format unbekannt');
+    const key=`${data.year}-${String(data.month).padStart(2,'0')}`;
+    data.filename=file.name; data.chipId=id;
+    const chip=document.getElementById(id);
+    if(chip)chip.dataset.monthkey=key;
+    allData[key]=data;
+    const lbl=`${MON_SHORT[data.month]} ${data.year}`;
+    updateChip(id,true,lbl);
+    showToast(`✓ ${lbl} — ${data.count} Messungen`);
+    renderAll();
+  }catch(e){
+    updateChip(id,false,'');
+    showToast('⚠ Fehler: '+file.name);
+    console.error(e);
+  }
+}
+
+function parsePDF(txt){
+  const hm=txt.match(/Monthly Report\s+(\w+),?\s*(\d{4})/i);
+  if(!hm)return null;
+  const rm=MON_EN[hm[1]]; const ry=parseInt(hm[2]);
+  if(!rm||!ry)return null;
+  const pat=/(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December),?\s*(\d{2,4})\s+(\d{2}:\d{2})\s+(\d{2,3})\s+(\d{2,3})\s+(\d{2,3})/g;
+  const readings=[]; let m;
+  while((m=pat.exec(txt))!==null){
+    const [,day,mon,yr,time,sbp,dbp,hr]=m;
+    const yf=yr.length===2?2000+parseInt(yr):parseInt(yr);
+    const mn=MON_EN[mon];
+    if(mn===rm&&yf===ry) readings.push({day:parseInt(day),time,sys:parseInt(sbp),dia:parseInt(dbp),hr:parseInt(hr)});
+  }
+  if(readings.length<10)return null;
+  const sys=readings.map(r=>r.sys), dia=readings.map(r=>r.dia), hrs=readings.map(r=>r.hr);
+  const n=readings.length;
+  const avg=a=>Math.round(a.reduce((x,y)=>x+y)/a.length);
+  const peakIdx=sys.indexOf(Math.max(...sys));
+  const peak=readings[peakIdx];
+  const pct=(fn)=>Math.round(sys.filter(fn).length/n*100);
+
+  // Per-day stats for deviation analysis
+  const byDay={};
+  readings.forEach(r=>{
+    if(!byDay[r.day])byDay[r.day]={sys:[],dia:[],hr:[]};
+    byDay[r.day].sys.push(r.sys);
+    byDay[r.day].dia.push(r.dia);
+    byDay[r.day].hr.push(r.hr);
+  });
+  const globalMeanSys=sys.reduce((a,b)=>a+b)/n;
+  const globalSD=Math.sqrt(sys.reduce((a,b)=>a+(b-globalMeanSys)**2,0)/n);
+  const dayStats=Object.keys(byDay).map(day=>{
+    const s=byDay[day].sys, d=byDay[day].dia, h=byDay[day].hr;
+    const ms=s.reduce((a,b)=>a+b)/s.length;
+    return{day:parseInt(day),meanSys:Math.round(ms*10)/10,meanDia:Math.round(d.reduce((a,b)=>a+b)/d.length*10)/10,meanHr:Math.round(h.reduce((a,b)=>a+b)/h.length*10)/10,maxSys:Math.max(...s),minSys:Math.min(...s),devSys:Math.round((ms-globalMeanSys)*10)/10,n:s.length};
+  }).sort((a,b)=>a.day-b.day);
+  const threshold=globalMeanSys+1.5*globalSD;
+  const outliers=readings.filter(r=>r.sys>=threshold).map(r=>({...r,dev:Math.round((r.sys-globalMeanSys)*10)/10})).sort((a,b)=>b.sys-a.sys);
+  return{
+    month:rm,year:ry,count:n,
+    sysMean:avg(sys),diaMean:avg(dia),hrMean:avg(hrs),
+    sysMax:Math.max(...sys),sysMin:Math.min(...sys),
+    diaMax:Math.max(...dia),diaMin:Math.min(...dia),
+    hrMax:Math.max(...hrs),hrMin:Math.min(...hrs),
+    peakTime:peak?.time||'–',peakDay:peak?.day||'–',
+    inRange:Math.round(sys.filter(s=>s<130).length/n*1000)/10,
+    optimalRange:Math.round(sys.filter(s=>s<120).length/n*1000)/10,
+    sysOptimal:pct(s=>s<120),sysNormal:pct(s=>s>=120&&s<130),
+    sysElevated:pct(s=>s>=130&&s<140),sysHigh1:pct(s=>s>=140&&s<160),sysHigh2:pct(s=>s>=160),
+    hrBrady:Math.round(hrs.filter(h=>h<60).length/n*100),
+    hrNormal:Math.round(hrs.filter(h=>h>=60&&h<=100).length/n*100),
+    hrTachy:Math.round(hrs.filter(h=>h>100).length/n*100),
+    globalMeanSys:Math.round(globalMeanSys*10)/10,
+    globalSD:Math.round(globalSD*10)/10,
+    threshold:Math.round(threshold*10)/10,
+    dayStats, outliers,
+  };
+}
+
+function sorted(){return Object.keys(allData).sort().map(k=>allData[k])}
+function sysCol(v){return v>=160?'#ef4444':v>=140?'#f97316':v>=130?'#fbbf24':'#4ade80'}
+function pctCol(v){return v>=90?'#4ade80':v>=75?'#fbbf24':'#f97316'}
+
+function renderAll(){
+  const s=sorted();
+  // Toggle buttons
+  document.getElementById('reset-btn').disabled = s.length === 0;
+  document.getElementById('export-btn').disabled = s.length === 0;
+  // Header
+  document.getElementById('header-sub').textContent=s.length?s.map(d=>`${MON_SHORT[d.month]} ${d.year}`).join(' · '):'Persönliche Blutdruck-Analyse';
+  // KPI
+  const grid=document.getElementById('kpi-grid');
+  if(!s.length){grid.innerHTML='<div class="kpi-empty">Noch keine Daten</div><div class="kpi-empty">Noch keine Daten</div>';return;}
+  grid.innerHTML=s.map(d=>`<div class="kpi-card">
+    <div class="kpi-month">${MON_SHORT[d.month]} ${d.year}</div>
+    <div class="kpi-val" style="color:${sysCol(d.sysMean)}">${d.sysMean}/${d.diaMean}</div>
+    <div class="kpi-hr">⌀ Puls ${d.hrMean} · ${d.count} Mess.</div>
+    <div class="progress-bar"><div class="progress-fill" style="width:${d.optimalRange}%;background:${pctCol(d.optimalRange)}"></div></div>
+    <div class="kpi-pct">${d.optimalRange}% Optimaler Bereich</div>
+  </div>`).join('');
+  renderOverview(s); renderBD(s); renderPuls(s); renderExtremes(s); renderTagesSetup(s);
+}
+
+function showHide(id,show){
+  document.getElementById('empty-'+id).style.display=show?'none':'';
+  document.getElementById(id+'-content').style.display=show?'':'none';
+}
+
+function renderOverview(s){
+  showHide('overview',s.length>0);
+  if(!s.length)return;
+  const n=s.length, W=280, pad=20;
+  const xs=s.map((_,i)=>pad+i*(n>1?(W/(n-1)):0));
+  const sMin=105,sMax=140;
+  const sysYs=s.map(d=>80-((d.sysMean-sMin)/(sMax-sMin))*80);
+  const pts=xs.map((x,i)=>`${x},${sysYs[i]}`).join(' ');
+  const area=pts+` ${xs[n-1]},92 ${xs[0]},92`;
+  const eshY=80-((130-sMin)/(sMax-sMin))*80;
+  document.getElementById('overview-content').innerHTML=`
+  <div class="chart-card">
+    <div class="chart-title">Systolischer Verlauf</div>
+    <div class="chart-sub">Ø pro Monat</div>
+    <div class="spark-wrap">
+      <svg class="spark" viewBox="0 0 320 105" preserveAspectRatio="none">
+        <line x1="0" y1="20" x2="320" y2="20" stroke="#1e2d3d" stroke-width="1"/>
+        <line x1="0" y1="53" x2="320" y2="53" stroke="#1e2d3d" stroke-width="1"/>
+        <line x1="0" y1="80" x2="320" y2="80" stroke="#1e2d3d" stroke-width="1"/>
+        <text x="2" y="14" fill="#5a7a99" font-size="8" font-family="JetBrains Mono">140</text>
+        <text x="2" y="57" fill="#5a7a99" font-size="8" font-family="JetBrains Mono">122</text>
+        <text x="2" y="84" fill="#5a7a99" font-size="8" font-family="JetBrains Mono">110</text>
+        <line x1="0" y1="${eshY}" x2="320" y2="${eshY}" stroke="#3b7dd866" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <text x="2" y="${eshY-2}" fill="#3b7dd8" font-size="8" font-family="JetBrains Mono">130</text>
+        <polygon points="${area}" fill="#3b7dd811"/>
+        <polyline points="${pts}" fill="none" stroke="#3b7dd8" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+        ${s.map((d,i)=>{const x=xs[i],y=sysYs[i],c=sysCol(d.sysMean);return`
+          <circle cx="${x}" cy="${y}" r="5" fill="${c}" stroke="#0d1117" stroke-width="2"/>
+          <text x="${x}" y="${y>18?y-9:y+14}" fill="${c}" font-size="10" font-family="JetBrains Mono" font-weight="600" text-anchor="middle">${d.sysMean}</text>
+          <text x="${x}" y="102" fill="#5a7a99" font-size="8" font-family="JetBrains Mono" text-anchor="middle">${MON_SHORT[d.month]}</text>`}).join('')}
+      </svg>
+    </div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Anteil im Optimalen Bereich</div>
+    <div class="chart-sub">SYS &lt;120 mmHg</div>
+    <div class="bar-group">
+      ${s.map(d=>`<div class="bar-row">
+        <div class="bar-label">${MON_SHORT[d.month]} '${String(d.year).slice(2)}</div>
+        <div class="bar-track">
+          <div class="bar-segment" style="width:${d.optimalRange}%;background:#4ade80"></div>
+          <div class="bar-segment" style="width:${100-d.optimalRange}%;background:#f97316"></div>
+        </div>
+        <div class="bar-val" style="color:${pctCol(d.optimalRange)}">${d.optimalRange}%</div>
+      </div>`).join('')}
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div>Optimaler Bereich (&lt;120)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>Über 120 mmHg</div>
+    </div>
+  </div>
+  `;
+}
+
+function renderBD(s){
+  showHide('bd',s.length>0);
+  if(!s.length)return;
+  document.getElementById('bd-content').innerHTML=`<div class="chart-card">
+    <div class="chart-title">Systolischer BD – Kategorien</div>
+    <div class="chart-sub">Anteil in % nach Schwellenwerten</div>
+    <div class="bar-group">${s.map(d=>{const above=d.sysElevated+d.sysHigh1+d.sysHigh2;return`<div class="bar-row">
+      <div class="bar-label">${MON_SHORT[d.month]} '${String(d.year).slice(2)}</div>
+      <div class="bar-track">
+        <div class="bar-segment" style="width:${d.sysOptimal}%;background:#22c55e"></div>
+        <div class="bar-segment" style="width:${d.sysNormal}%;background:#86efac"></div>
+        <div class="bar-segment" style="width:${d.sysElevated}%;background:#fbbf24"></div>
+        <div class="bar-segment" style="width:${d.sysHigh1}%;background:#f97316"></div>
+        <div class="bar-segment" style="width:${d.sysHigh2}%;background:#ef4444"></div>
+      </div>
+      <div class="bar-val" style="color:${above>15?'#f97316':'#4ade80'}">${above}%↑</div>
+    </div>`}).join('')}</div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>Optimal &lt;120</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#86efac"></div>Normal 120–129</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#fbbf24"></div>Erhöht 130–139</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>Grad 1 140–159</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Grad 2+ ≥160</div>
+    </div>
+  </div>`;
+}
+
+function renderPuls(s){
+  showHide('puls',s.length>0);
+  if(!s.length)return;
+  document.getElementById('puls-content').innerHTML=`
+  <div class="chart-card">
+    <div class="chart-title">Pulsfrequenz – Kategorien</div>
+    <div class="chart-sub">Bradykardie &lt;60 · Normal 60–100 · Tachykardie &gt;100 bpm</div>
+    <div class="bar-group">${s.map(d=>`<div class="bar-row">
+      <div class="bar-label">${MON_SHORT[d.month]} '${String(d.year).slice(2)}</div>
+      <div class="bar-track">
+        <div class="bar-segment" style="width:${d.hrBrady}%;background:#a78bfa"></div>
+        <div class="bar-segment" style="width:${d.hrNormal}%;background:#22c55e"></div>
+        <div class="bar-segment" style="width:${d.hrTachy}%;background:#ef4444"></div>
+      </div>
+      <div class="bar-val" style="color:#22c55e">${d.hrNormal}%</div>
+    </div>`).join('')}</div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>Bradykardie</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>Normal</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Tachykardie</div>
+    </div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Pulstabelle</div>
+    <table class="data-table">
+      <thead><tr><th>Monat</th><th style="color:#22c55e">Ø</th><th style="color:#a78bfa">Min</th><th style="color:#f97316">Max</th><th>n</th></tr></thead>
+      <tbody>${s.map(d=>`<tr>
+        <td style="font-weight:600">${MON_SHORT[d.month]} ${d.year}</td>
+        <td style="color:#22c55e;font-family:'JetBrains Mono',monospace;font-weight:600">${d.hrMean}</td>
+        <td style="color:#a78bfa;font-family:'JetBrains Mono',monospace">${d.hrMin}</td>
+        <td style="color:#f97316;font-family:'JetBrains Mono',monospace">${d.hrMax}</td>
+        <td style="color:var(--muted);font-family:'JetBrains Mono',monospace">${d.count}</td>
+      </tr>`).join('')}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderExtremes(s){
+  showHide('extremes',s.length>0);
+  if(!s.length)return;
+  document.getElementById('extremes-content').innerHTML=`
+  <div class="chart-card">
+    <div class="chart-title">Höchstwerte pro Monat</div>
+    <div class="chart-sub">Systolisch / Diastolisch Maxima</div>
+    <div class="peak-grid">${s.map(d=>{
+      const c=sysCol(d.sysMax);
+      const g=d.sysMax>=160?'🔴 Grad 2':d.sysMax>=140?'⚠ Grad 1':'↑ Erhöht';
+      return`<div class="peak-card" style="border-color:${c}">
+        <div class="peak-month">${MON_LONG[d.month]} ${d.year}</div>
+        <div class="peak-val" style="color:${c}">${d.sysMax}/${d.diaMax}</div>
+        <div class="peak-date">${d.peakDay}. ${MON_SHORT[d.month]} · ${d.peakTime}</div>
+        <div style="font-size:10px;margin-top:6px;color:${c}">${g}</div>
+      </div>`;
+    }).join('')}</div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Monatstabelle</div>
+    <div style="overflow-x:auto"><table class="data-table">
+      <thead><tr><th>Monat</th><th>Ø SYS</th><th>Max SYS</th><th>Min SYS</th><th>Max DIA</th></tr></thead>
+      <tbody>${s.map(d=>`<tr>
+        <td style="font-weight:600">${MON_SHORT[d.month]} ${d.year}</td>
+        <td style="color:#3b7dd8;font-family:'JetBrains Mono',monospace">${d.sysMean}</td>
+        <td style="color:${sysCol(d.sysMax)};font-family:'JetBrains Mono',monospace;font-weight:700">${d.sysMax}</td>
+        <td style="color:#4ade80;font-family:'JetBrains Mono',monospace">${d.sysMin}</td>
+        <td style="color:${d.diaMax>=90?'#f97316':'#fbbf24'};font-family:'JetBrains Mono',monospace">${d.diaMax}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>
+  `;
+}
+
+function exportPDF(){
+  const s=sorted();
+  if(!s.length)return;
+  const today=new Date().toLocaleDateString('de-CH');
+  const months=s.map(d=>`${MON_LONG[d.month]} ${d.year}`).join(', ');
+
+  const sc=v=>v>=160?'#dc2626':v>=140?'#ea580c':v>=130?'#d97706':'#16a34a';
+  const pc=v=>v>=90?'#16a34a':v>=75?'#d97706':'#ea580c';
+  const bar=(pct,col,h=8)=>`<div style="background:#e5e7eb;border-radius:3px;height:${h}px;overflow:hidden"><div style="width:${Math.min(pct,100)}%;height:100%;background:${col};border-radius:3px"></div></div>`;
+  const badge=(txt,bg,col)=>`<span style="background:${bg};color:${col};padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600">${txt}</span>`;
+
+  // ── Section 1: KPI cards ──
+  const kpiCards=s.map(d=>`
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;text-align:center">
+      <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">${MON_SHORT[d.month]} ${d.year}</div>
+      <div style="font-size:24px;font-weight:800;font-family:monospace;color:${sc(d.sysMean)}">${d.sysMean}/${d.diaMean}</div>
+      <div style="font-size:10px;color:#6b7280;margin:2px 0">⌀ Puls ${d.hrMean} bpm · ${d.count} Mess.</div>
+      ${bar(d.optimalRange,pc(d.optimalRange),6)}
+      <div style="font-size:11px;color:${pc(d.optimalRange)};font-weight:700;margin-top:3px">${d.optimalRange}% Optimaler Bereich</div>
+    </div>`).join('');
+
+  // ── Section 2: Übersicht Tabelle ──
+  const overviewRows=s.map(d=>`<tr>
+    <td style="font-weight:700">${MON_LONG[d.month]} ${d.year}</td>
+    <td style="font-family:monospace;font-weight:700;color:${sc(d.sysMean)};text-align:center">${d.sysMean}/${d.diaMean}</td>
+    <td style="text-align:center;color:#6b7280;font-family:monospace">${d.hrMean}</td>
+    <td style="min-width:80px">${bar(d.optimalRange,pc(d.optimalRange))}<div style="font-size:10px;color:${pc(d.optimalRange)};font-weight:700;margin-top:2px">${d.optimalRange}%</div></td>
+    <td style="text-align:center;font-family:monospace;color:${sc(d.sysMax)};font-weight:700">${d.sysMax}/${d.diaMax}</td>
+    <td style="text-align:center;font-family:monospace;color:#ef4444;font-weight:700">${d.sysMin}/${d.diaMin}</td>
+  </tr>`).join('');
+
+  // ── Section 3: BD-Kategorien ──
+  const catRows=s.map(d=>`<tr>
+    <td style="font-weight:700">${MON_SHORT[d.month]} ${d.year}</td>
+    <td style="text-align:center">${badge(d.sysOptimal+'%','#dcfce7','#166534')}</td>
+    <td style="text-align:center">${badge(d.sysNormal+'%','#d1fae5','#065f46')}</td>
+    <td style="text-align:center">${badge(d.sysElevated+'%','#fef3c7','#92400e')}</td>
+    <td style="text-align:center">${badge(d.sysHigh1+'%','#ffedd5','#9a3412')}</td>
+    <td style="text-align:center">${badge(d.sysHigh2+'%','#fee2e2','#991b1b')}</td>
+    <td style="min-width:80px">${bar(d.sysOptimal+d.sysNormal,'#16a34a')}</td>
+  </tr>`).join('');
+
+  // ── Section 4: Puls ──
+  const pulsRows=s.map(d=>`<tr>
+    <td style="font-weight:700">${MON_SHORT[d.month]} ${d.year}</td>
+    <td style="text-align:center;font-family:monospace;font-weight:700;color:#16a34a">${d.hrMean}</td>
+    <td style="text-align:center;font-family:monospace;color:#7c3aed">${d.hrMin}</td>
+    <td style="text-align:center;font-family:monospace;color:#ea580c">${d.hrMax}</td>
+    <td style="text-align:center">${badge(d.hrBrady+'%','#ede9fe','#5b21b6')}</td>
+    <td style="text-align:center">${badge(d.hrNormal+'%','#dcfce7','#166534')}</td>
+    <td style="text-align:center">${badge(d.hrTachy+'%','#fee2e2','#991b1b')}</td>
+  </tr>`).join('');
+
+  // ── Section 5: Extremwerte ──
+  const extremeCards=s.map(d=>{
+    const col=sc(d.sysMax);
+    const grade=d.sysMax>=160?'Grad 2':d.sysMax>=140?'Grad 1':'Erhöht';
+    return`<div style="border:1px solid #e2e8f0;border-left:4px solid ${col};border-radius:8px;padding:12px;background:#fafafa">
+      <div style="font-size:10px;color:#6b7280;margin-bottom:4px">${MON_LONG[d.month]} ${d.year}</div>
+      <div style="font-size:20px;font-weight:800;font-family:monospace;color:${col}">${d.sysMax}/${d.diaMax}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px">${d.peakDay}. ${MON_SHORT[d.month]} · ${d.peakTime} Uhr</div>
+      <div style="font-size:11px;color:${col};font-weight:600;margin-top:4px">⚠ ${grade}</div>
+    </div>`;
+  }).join('');
+
+  // ── Section 6: Tagesanalyse pro Monat ──
+  const tagesSection=s.map(d=>{
+    if(!d.dayStats||!d.dayStats.length)return'';
+    const ds=d.dayStats;
+    const mean=d.globalMeanSys;
+    const thresh=d.threshold;
+    const out=d.outliers||[];
+    const nightOut=out.filter(r=>{const h=parseInt(r.time);return h>=22||h<=5;}).length;
+
+    const devRows=ds.map(day=>{
+      const pos=day.devSys>=0;
+      const hi=Math.abs(day.devSys)>3;
+      const col=pos?'#dc2626':'#2563eb';
+      const pct=Math.min(Math.abs(day.devSys)/10*100,100);
+      return`<tr style="background:${hi?'#fff7f7':'#fff'}">
+        <td style="font-family:monospace;font-size:11px;color:#6b7280;width:30px">${day.day}.</td>
+        <td style="font-family:monospace;font-size:11px;font-weight:${hi?'700':'400'};color:${sc(day.meanSys)}">${day.meanSys}</td>
+        <td style="width:120px">${bar(pct,col)}</td>
+        <td style="font-family:monospace;font-size:11px;color:${col};font-weight:700;width:40px">${pos?'+':''}${day.devSys}</td>
+        <td style="font-family:monospace;font-size:11px;color:#6b7280;width:40px">${day.maxSys}</td>
+      </tr>`;
+    }).join('');
+
+    const topOutliers=out.slice(0,6).map(r=>{
+      const h=parseInt(r.time),isNight=h>=22||h<=5;
+      return`<div style="border-left:3px solid ${sc(r.sys)};padding:6px 8px;background:#fafafa;border-radius:4px;font-size:11px">
+        <span style="color:#6b7280">${r.day}. ${MON_SHORT[d.month]} ${r.time} ${isNight?'🌙':'☀️'}</span>
+        <span style="font-family:monospace;font-weight:700;color:${sc(r.sys)};margin-left:8px">${r.sys}/${r.dia}</span>
+        <span style="color:${sc(r.sys)};margin-left:6px">+${r.dev}</span>
+      </div>`;
+    }).join('');
+
+    return`<div style="page-break-inside:avoid;margin-bottom:24px">
+      <div class="section-title">${MON_LONG[d.month]} ${d.year} — Tagesanalyse</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+        <div class="mini-kpi"><div class="mk-val" style="color:#16a34a">${mean}</div><div class="mk-lbl">Ø SYS global</div></div>
+        <div class="mini-kpi"><div class="mk-val" style="color:#d97706">${thresh}</div><div class="mk-lbl">1.5σ Schwelle</div></div>
+        <div class="mini-kpi" style="border-color:#fca5a5"><div class="mk-val" style="color:#dc2626">${out.length}</div><div class="mk-lbl">Ausreißer · ${nightOut} nachts</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:6px">Tagesabweichungen</div>
+          <table style="font-size:11px"><thead><tr>
+            <th style="width:30px">Tag</th><th>Ø SYS</th><th style="width:120px">Abw.</th><th style="width:40px">Δ</th><th style="width:40px">Max</th>
+          </tr></thead><tbody>${devRows}</tbody></table>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:6px">Top Ausreißer (>${thresh} mmHg)</div>
+          <div style="display:flex;flex-direction:column;gap:4px">${topOutliers||'<div style="color:#6b7280;font-size:11px">Keine Ausreißer</div>'}</div>
+          `
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const html=`<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"/>
+  <title>BP Monitor Bericht ${today}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,Helvetica,sans-serif;color:#111;background:#fff;padding:24px;font-size:12px;max-width:900px;margin:0 auto}
+    .header{background:linear-gradient(135deg,#0d1a2e,#1a2535);color:#fff;border-radius:12px;padding:18px 22px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center}
+    .header h1{font-size:20px;font-weight:800}
+    .section{margin-bottom:18px;page-break-inside:avoid}
+    .section-title{font-size:12px;font-weight:700;color:#3b7dd8;text-transform:uppercase;letter-spacing:1px;border-bottom:2px solid #3b7dd8;padding-bottom:4px;margin-bottom:10px}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th{background:#f1f5f9;padding:7px 8px;text-align:left;font-size:10px;color:#374151;font-weight:600;border-bottom:2px solid #e2e8f0}
+    td{padding:7px 8px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+    tr:last-child td{border-bottom:none}
+    .mini-kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center}
+    .mk-val{font-size:20px;font-weight:800;font-family:monospace}
+    .mk-lbl{font-size:10px;color:#6b7280;margin-top:2px}
+    .disclaimer{background:#fef9ec;border:1px solid #fde68a;border-radius:8px;padding:10px;font-size:10px;color:#78350f;line-height:1.6;margin-top:16px}
+    .footer{text-align:center;font-size:10px;color:#9ca3af;margin-top:12px;padding-top:10px;border-top:1px solid #f1f5f9}
+    @media print{body{padding:8px}@page{margin:12mm;size:A4}}
+  </style></head><body>
+
+  <div class="header">
+    <div>
+      <div style="font-size:9px;color:#3b7dd8;letter-spacing:2px;margin-bottom:3px">HILO BAND · 24H ABPM</div>
+      <h1>❤️ BP Monitor</h1>
+      <div style="font-size:10px;color:#5a7a99;margin-top:3px">${months}</div>
+    </div>
+    <div style="text-align:right;font-size:10px;color:#5a7a99;line-height:1.8">
+      <div>Erstellt: ${today}</div>
+      <div>${s.reduce((a,d)=>a+d.count,0)} Messungen total</div>
+      <div>${s.length} Monate</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(${s.length},1fr);gap:10px;margin-bottom:18px">
+    ${kpiCards}
+  </div>
+
+  <div class="section">
+    <div class="section-title">Monatsübersicht</div>
+    <table><thead><tr><th>Monat</th><th>Ø SYS/DIA</th><th>Ø Puls</th><th>Optimal &lt;120</th><th>Max SYS/DIA</th><th>Min SYS/DIA</th></tr></thead>
+    <tbody>${overviewRows}</tbody></table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">BD-Kategorien (Systolisch)</div>
+    <table><thead><tr><th>Monat</th><th style="color:#166534">Optimal &lt;120</th><th style="color:#065f46">Normal 120–129</th><th style="color:#92400e">Erhöht 130–139</th><th style="color:#9a3412">Grad 1 140–159</th><th style="color:#991b1b">Grad 2 ≥160</th><th>Verlauf</th></tr></thead>
+    <tbody>${catRows}</tbody></table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Pulsfrequenz</div>
+    <table><thead><tr><th>Monat</th><th>Ø Puls</th><th>Min</th><th>Max</th><th style="color:#5b21b6">Bradykardie &lt;60</th><th style="color:#166534">Normal 60–100</th><th style="color:#991b1b">Tachykardie &gt;100</th></tr></thead>
+    <tbody>${pulsRows}</tbody></table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Extremwerte</div>
+    <div style="display:grid;grid-template-columns:repeat(${Math.min(s.length,4)},1fr);gap:10px">${extremeCards}</div>
+  </div>
+
+  <div style="page-break-before:always">
+    <div class="section-title" style="margin-bottom:16px">Tagesanalyse pro Monat</div>
+    ${tagesSection}
+  </div>
+
+  <div class="footer">BP Monitor · Erstellt mit claude.ai · ${today}</div>
+</body></html>`;
+
+  const frame=document.getElementById('report-frame');
+  frame.srcdoc=html;
+  document.getElementById('report-overlay').classList.add('show');
+
+  // Store html for new-tab printing
+  document.getElementById('report-frame').dataset.html=html;
+}
+
+function printReport(){
+  const html=document.getElementById('report-frame').dataset.html;
+  if(!html)return;
+  const win=window.open('','_blank');
+  if(!win){showToast('⚠ Bitte Pop-ups erlauben');return;}
+  win.document.write(html);
+  win.document.close();
+  setTimeout(()=>win.print(),800);
+}
+
+function closeReport(){
+  document.getElementById('report-overlay').classList.remove('show');
+}
+
+function importData(input){
+  const file=input.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const payload=JSON.parse(e.target.result);
+      if(!payload.months||!Array.isArray(payload.months))throw new Error('Ungültiges Format');
+      let count=0;
+      payload.months.forEach(d=>{
+        if(!d.month||!d.year)return;
+        const key=`${d.year}-${String(d.month).padStart(2,'0')}`;
+        allData[key]=d;
+        // Add chip
+        const id='chip-import-'+key;
+        document.getElementById(id)?.remove();
+        const div=document.createElement('div');
+        div.className='file-chip'; div.id=id; div.dataset.monthkey=key;
+        div.innerHTML=`<span>📊</span><span class="chip-name">Import · ${MON_SHORT[d.month]} ${d.year}</span><span class="chip-ok">✓ importiert</span><button class="remove-btn">✕</button>`;
+        div.querySelector('.remove-btn').addEventListener('click',()=>{
+          delete allData[key]; div.remove(); renderAll();
+        });
+        document.getElementById('upload-status').appendChild(div);
+        count++;
+      });
+      renderAll();
+      showToast(`📥 ${count} Monat${count>1?'e':''} importiert`);
+    }catch(err){
+      showToast('⚠ Import fehlgeschlagen: '+err.message);
+    }
+    input.value='';
+  };
+  reader.readAsText(file);
+}
+
+function confirmReset(){
+  if(Object.keys(allData).length===0)return;
+  document.getElementById('confirm-overlay').classList.add('show');
+}
+function closeConfirm(){
+  document.getElementById('confirm-overlay').classList.remove('show');
+}
+function doReset(){
+  allData={};
+  document.getElementById('upload-status').innerHTML='';
+  closeConfirm();
+  renderAll();
+  showToast('🗑 Alle Daten gelöscht');
+}
+
+// close overlay on backdrop tap
+document.getElementById('confirm-overlay').addEventListener('click',function(e){
+  if(e.target===this)closeConfirm();
+});
+
+function renderTagesSetup(s){
+  showHide('tages', s.length>0);
+  if(!s.length)return;
+  const sel=document.getElementById('tages-month-select');
+  const cur=sel.value;
+  sel.innerHTML=s.map(d=>`<option value="${d.year}-${String(d.month).padStart(2,'0')}">${MON_LONG[d.month]} ${d.year}</option>`).join('');
+  if(cur&&s.find(d=>`${d.year}-${String(d.month).padStart(2,'0')}`===cur))sel.value=cur;
+  renderTages();
+}
+
+function renderTages(){
+  const sel=document.getElementById('tages-month-select');
+  if(!sel)return;
+  const key=sel.value;
+  const d=allData[key];
+  if(!d||!d.dayStats)return;
+  const ds=d.dayStats;
+  const mean=d.globalMeanSys;
+  const thresh=d.threshold;
+  const out=d.outliers||[];
+  const maxDev=Math.max(...ds.map(x=>Math.abs(x.devSys)),1);
+  const nightOut=out.filter(r=>{const h=parseInt(r.time);return h>=22||h<=5;});
+  const dayOut=out.filter(r=>{const h=parseInt(r.time);return h>=6&&h<=21;});
+
+  // Sparkline
+  const W=280,pad=16,n=ds.length;
+  const xs=ds.map((_,i)=>pad+i*((W-2*pad)/(n-1||1)));
+  const allSys=ds.map(x=>x.meanSys);
+  const sMin=Math.min(...allSys)-3,sMax=Math.max(...allSys)+3;
+  const toY=v=>80-((v-sMin)/(sMax-sMin))*72;
+  const meanY=toY(mean), threshY=toY(thresh);
+  const pts=xs.map((x,i)=>`${x},${toY(ds[i].meanSys)}`).join(' ');
+  const area=pts+` ${xs[n-1]},88 ${xs[0]},88`;
+
+  // Hour histogram
+  const hourCounts=Array(24).fill(0);
+  out.forEach(r=>{const h=parseInt(r.time);if(h>=0&&h<24)hourCounts[h]++;});
+  const maxH=Math.max(...hourCounts,1);
+
+  document.getElementById('tages-inner').innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;text-align:center">
+      <div style="font-size:18px;font-weight:700;color:#4ade80;font-family:'JetBrains Mono',monospace">${mean}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">Ø SYS</div>
+    </div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;text-align:center">
+      <div style="font-size:18px;font-weight:700;color:#fbbf24;font-family:'JetBrains Mono',monospace">${thresh}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">Schwelle</div>
+    </div>
+    <div style="background:var(--bg2);border:1px solid #ef444444;border-radius:10px;padding:10px 12px;text-align:center">
+      <div style="font-size:18px;font-weight:700;color:#ef4444;font-family:'JetBrains Mono',monospace">${out.length}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px">Ausreißer</div>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-title">Tagesdurchschnitt SYS</div>
+    <div class="chart-sub">Pro Tag · grün = Mittel · orange = 1.5σ-Schwelle</div>
+    <div class="spark-wrap">
+      <svg class="spark" viewBox="0 0 312 95" preserveAspectRatio="none">
+        <line x1="0" y1="20" x2="312" y2="20" stroke="#1e2d3d" stroke-width="1"/>
+        <line x1="0" y1="50" x2="312" y2="50" stroke="#1e2d3d" stroke-width="1"/>
+        <line x1="0" y1="80" x2="312" y2="80" stroke="#1e2d3d" stroke-width="1"/>
+        <line x1="0" y1="${meanY}" x2="312" y2="${meanY}" stroke="#4ade8077" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <line x1="0" y1="${threshY}" x2="312" y2="${threshY}" stroke="#f9731677" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <polygon points="${area}" fill="#3b7dd811"/>
+        <polyline points="${pts}" fill="none" stroke="#3b7dd8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+        ${ds.map((day,i)=>{
+          const x=xs[i],y=toY(day.meanSys);
+          const isHigh=day.devSys>2,isLow=day.devSys<-2;
+          const col=isHigh?'#ef4444':isLow?'#5297e0':'#3b7dd8';
+          const show=isHigh||isLow||i===0||i===ds.length-1;
+          return`<circle cx="${x}" cy="${y}" r="${isHigh||isLow?4:2.5}" fill="${col}" stroke="#0d1117" stroke-width="1.5"/>
+          ${show?`<text x="${x}" y="${y>15?y-7:y+12}" fill="${col}" font-size="8" font-family="JetBrains Mono" text-anchor="middle">${day.meanSys}</text>`:''}
+          ${i%5===0?`<text x="${x}" y="93" fill="#3a5570" font-size="7.5" font-family="JetBrains Mono" text-anchor="middle">${day.day}</text>`:''}`;
+        }).join('')}
+      </svg>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-title">Tägliche Abweichung vom Mittel</div>
+    <div class="chart-sub">Rot = über Mittel · Blau = unter Mittel · rechts = Tagesmax</div>
+    <div style="display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto">
+      ${ds.map(day=>{
+        const pct=Math.min(Math.abs(day.devSys)/maxDev*100,100);
+        const pos=day.devSys>=0;
+        const hi=Math.abs(day.devSys)>3;
+        return`<div style="display:flex;align-items:center;gap:6px;background:${hi?'#1a1525':'transparent'};border-radius:5px;padding:2px 4px">
+          <div style="width:22px;font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace;flex-shrink:0;text-align:right">${day.day}.</div>
+          <div style="flex:1;height:14px;background:var(--bg3);border-radius:3px;position:relative;overflow:hidden">
+            <div style="position:absolute;height:100%;border-radius:3px;background:${pos?'linear-gradient(90deg,#ef4444,#ff8080)':'linear-gradient(90deg,#5297e0,#80c4ff)'};width:${pct}%;${pos?'left:0':'right:0'}"></div>
+          </div>
+          <div style="width:34px;font-size:10px;font-family:'JetBrains Mono',monospace;color:${pos?'#ef4444':'#5297e0'};text-align:right;flex-shrink:0">${pos?'+':''}${day.devSys}</div>
+          <div style="width:26px;font-size:9px;color:var(--muted);font-family:'JetBrains Mono',monospace;text-align:right;flex-shrink:0">${day.maxSys}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>
+
+  ${out.length>0?`<div class="chart-card">
+    <div class="chart-title">Ausreißer &gt; ${thresh} mmHg</div>
+    <div class="chart-sub">${out.length} Messungen · sortiert nach Schwere</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      ${out.slice(0,12).map(r=>{
+        const h=parseInt(r.time),isNight=h>=22||h<=5;
+        const col=r.sys>=150?'#ef4444':r.sys>=140?'#f97316':'#fbbf24';
+        return`<div style="background:var(--bg);border-left:3px solid ${col};border-radius:8px;padding:8px 10px">
+          <div style="font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace">${r.day}. · ${r.time} ${isNight?'🌙':'☀️'}</div>
+          <div style="font-size:16px;font-weight:700;color:${col};font-family:'JetBrains Mono',monospace">${r.sys}/${r.dia}</div>
+          <div style="font-size:10px;color:${col}">+${r.dev} vs Ø</div>
+        </div>`;
+      }).join('')}
+      ${out.length>12?`<div style="grid-column:1/-1;text-align:center;font-size:11px;color:var(--muted);padding:8px">… und ${out.length-12} weitere</div>`:''}
+    </div>
+  </div>`:''}
+
+  <div class="chart-card">
+    <div class="chart-title">Ausreißer nach Uhrzeit</div>
+    <div class="chart-sub">${nightOut.length} nachts (22–05) 🌙 · ${dayOut.length} tagsüber ☀️</div>
+    <div style="display:flex;gap:2px;align-items:flex-end;height:72px;margin:8px 0">
+      ${hourCounts.map((cnt,h)=>{
+        const pct=cnt/maxH*100;
+        const isNight=h>=22||h<=5;
+        return`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px">
+          ${cnt>0?`<div style="font-size:7px;color:${isNight?'#a78bfa':'#5297e0'}">${cnt}</div>`:''}
+          <div style="width:100%;background:${cnt>0?(isNight?'linear-gradient(180deg,#a78bfa,#6040a8)':'linear-gradient(180deg,#5297e0,#3060a0)'):'var(--bg3)'};border-radius:2px 2px 0 0;min-height:3px;height:${Math.max(pct,cnt>0?10:2)}%"></div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);font-family:'JetBrains Mono',monospace"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+    <div style="display:flex;gap:12px;margin-top:8px">
+      <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>Nacht (22–05)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#5297e0"></div>Tag (06–21)</div>
+    </div>
+  </div>`;
+}
+
+if(/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.navigator.standalone&&!sessionStorage.getItem('ios-hint')){
+  sessionStorage.setItem('ios-hint','1');
+  setTimeout(()=>{
+    const h=document.createElement('div');
+    h.style.cssText='position:fixed;bottom:calc(20px + env(safe-area-inset-bottom));left:16px;right:16px;background:#1e2d3d;border:1px solid #3b7dd8;border-radius:14px;padding:14px 16px;z-index:200;font-size:13px;color:#e0e8f0;box-shadow:0 8px 32px rgba(0,0,0,.6);line-height:1.6';
+    h.innerHTML='<strong style="color:#3b7dd8">📲 BP Monitor installieren</strong><br>Tippe auf <strong>Teilen ⬆️</strong> dann <strong>„Zum Home-Bildschirm"</strong><button onclick="this.parentElement.remove()" style="float:right;background:none;border:none;color:#5a7a99;font-size:20px;cursor:pointer;margin-top:-4px">✕</button>';
+    document.body.appendChild(h);
+    setTimeout(()=>h.remove(),7000);
+  },2500);
+}
+</script>
+</body>
+</html>
